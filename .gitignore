@@ -1,0 +1,5 @@
+# Ignore OAuth credentials
+credentials.json
+token.pickle
+
+#secrets/
