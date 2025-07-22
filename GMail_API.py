@@ -5,23 +5,16 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
-from dataclasses import dataclass
 from datetime import datetime
+from email.mime.text import MIMEText
 import base64
-
-
-# Data class to store structured email information
-@dataclass
-class EmailData:
-    date: datetime
-    sender: str
-    subject: str
-    body: str
-    thread_id: str
-
+from CustomEmailDataClass import EmailData
 
 # Gmail API scope for read-only access to the user's inbox
-PERMISSION_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+PERMISSION_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.modify",   # Read/write (mark as read, etc.)
+    "https://www.googleapis.com/auth/gmail.send"      # Send email permission
+]
 
 ### Authenticates the user and returns a Gmail API service instance.
 # Handles loading existing credentials, refreshing tokens, or prompting login.
@@ -117,6 +110,51 @@ def Extract_Email_Body(email_content):
     return email_content.get("snippet", "")
 
 
+
+
+def Create_Raw_Email(to:str, subject:str, body:str)->str:
+    """
+    Creates a raw base64-encoded MIME email message
+    """
+    message = MIMEText(body)
+    message["to"] = to
+    message["subject"]=subject
+
+    raw_bytes = message.as_bytes()
+    raw_base64 = base64.urlsafe_b64encode(raw_bytes).decode()
+    return raw_base64
+
+def Send_Email_Reply(to: str, subject: str, body: str, thread_id: Optional[str] = None):
+    """
+    Sends an email reply using Gmail API. Optionally replies to an existing thread.
+    """
+    service = Authenticate_Gmail_Service()
+    raw_message = Create_Raw_Email(to, subject, body)
+
+    message = {
+        'raw': raw_message
+    }
+
+    if thread_id:
+        message['threadId'] = thread_id
+
+    try:
+        sent_message = service.users().messages().send(
+            userId='me',
+            body=message
+        ).execute()
+
+        print(f"Email sent to {to} | Message ID: {sent_message['id']}")
+        return sent_message
+
+    except Exception as e:
+        print(f"[ERROR] Failed to send email: {e}")
+        return None
+
+
+
+
+
 ### Prints the structured unread emails from the inbox.
 def Print_Unread_Emails(SortedData):
     email: EmailData
@@ -132,6 +170,12 @@ def Print_Unread_Emails(SortedData):
 def Init_Gmail_Service():
     return Authenticate_Gmail_Service()
 
+
+def RunEmailChecker():
+    gmail_service = Init_Gmail_Service()
+    summaries = Fetch_Unread_Email_Summaries(gmail_service)
+    sortedData = Parse_Email_Summaries(summaries, gmail_service)
+    return sortedData
 
 # Entry point — runs when the file is executed directly.
 if __name__ == "__main__":
