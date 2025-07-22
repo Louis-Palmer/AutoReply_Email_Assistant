@@ -5,14 +5,12 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import Resource
 from dataclasses import dataclass
 from datetime import datetime
 import base64
-import sys
 
 
-#Creating a data class to make it easier to manage the emails
+# Data class to store structured email information
 @dataclass
 class EmailData:
     date: datetime
@@ -22,133 +20,122 @@ class EmailData:
     thread_id: str
 
 
-#This is what permissions are requested when going through google Auth (Currently only email read permissions)
+# Gmail API scope for read-only access to the user's inbox
 PERMISSION_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-### Authenitcate_Gmail Handles the checking for already existing credientials and requersting a login if no valid credentials are found
-def Authenticate_Gmail():
-    user_credentials: Optional[Credentials] = None #this is type hinting which for this case i imported optional
-    
-    #Checks if the Token.Pickle which is the "last save" of the credientials is present
+### Authenticates the user and returns a Gmail API service instance.
+# Handles loading existing credentials, refreshing tokens, or prompting login.
+def Authenticate_Gmail_Service():
+    user_credentials: Optional[Credentials] = None
+
+    # Load saved credentials if available
     if Path("token.pickle").exists():
-        with open("token.pickle","rb") as token:
+        with open("token.pickle", "rb") as token:
             user_credentials = pickle.load(token)
             print("Token found")
 
-    #checks if credentials are not valid
+    # If credentials are missing or invalid, refresh or prompt login
     if not user_credentials or not user_credentials.valid:
-
-        #Refreshes the Token
         if user_credentials and user_credentials.expired and user_credentials.refresh_token:
             user_credentials.refresh(Request())
-            print("Token Refreshed")
-        #Opens the browser to request user to Login to create new token/credentials
+            print("Token refreshed")
         else:
-            app_flow: InstalledAppFlow = InstalledAppFlow.from_client_secrets_file('credentials.json', PERMISSION_SCOPES)
+            app_flow = InstalledAppFlow.from_client_secrets_file("credentials.json", PERMISSION_SCOPES)
             user_credentials = app_flow.run_local_server(port=0)
-            print("No Login Open Browser to log in")
+            print("No valid token, browser opened for login")
 
-        #Opens the token file and writes new token to it
-        with open("token.pickle","wb") as token:
-            pickle.dump(user_credentials,token)
-    #Creates a service which is a resource to use the GMail API and returns it
-    service = build("gmail","v1",credentials = user_credentials)
-    return service
-    
-###Function to list off unread emails gathered from the API
-def List_Unread_Emails(service):
-    #Gets metadata for unread emails, including message and thread ID, and additional data
-    unread_response =service.users().messages().list(
-        userId='me', 
-        labelIds=['INBOX'], 
+        # Save the updated credentials
+        with open("token.pickle", "wb") as token:
+            pickle.dump(user_credentials, token)
+
+    # Build and return the Gmail API service
+    return build("gmail", "v1", credentials=user_credentials)
+
+
+### Retrieves a list of unread emails in the inbox.
+# Returns message summaries (IDs and thread IDs) from the Gmail API.
+def Fetch_Unread_Email_Summaries(service):
+    unread_response = service.users().messages().list(
+        userId='me',
+        labelIds=['INBOX'],
         q='is:unread'
-        ).execute()
-    #Extracts only the unread emails summaries(ID and thread ID)
-    unread_summaries = unread_response.get("messages",[])
+    ).execute()
+
+    unread_summaries = unread_response.get("messages", [])
 
     if not unread_summaries:
-        print("No Unread Message Found")
+        print("No unread messages found.")
     else:
         return unread_summaries
 
-###Function that extracts the important details from the Email
-def Sort_Unread_Summaries(unread_summaries, service):
+
+### Fetches full message data and extracts key fields into EmailData objects.
+# Returns a list of structured email data.
+def Parse_Email_Summaries(unread_summaries, service):
     Emails_Store = []
     for i in range(len(unread_summaries)):
-            email_content = service.users().messages().get(userId='me', id = unread_summaries[i]['id']).execute()
-            email_headers = email_content["payload"]["headers"]
-            email_from = next((h["value"] for h in email_headers if h["name"] == "From"), None)
-            email_subject =next((h["value"] for h in email_headers if h["name"] == "Subject"), None)
-            email_internal_date = datetime.fromtimestamp(int(email_content['internalDate']) / 1000)
-            email_thread_id = email_content.get('threadId', '')
-            email_body = Extract_Body(email_content)
-            #email_body = None
+        email_content = service.users().messages().get(userId='me', id=unread_summaries[i]['id']).execute()
+        email_headers = email_content["payload"]["headers"]
 
+        email_from = next((h["value"] for h in email_headers if h["name"] == "From"), None)
+        email_subject = next((h["value"] for h in email_headers if h["name"] == "Subject"), None)
+        email_internal_date = datetime.fromtimestamp(int(email_content['internalDate']) / 1000)
+        email_thread_id = email_content.get('threadId', '')
+        email_body = Extract_Email_Body(email_content)
 
-            Emails_Store.append(EmailData(
-                date=email_internal_date,
-                sender=email_from,
-                subject=email_subject,
-                body=email_body,
-                thread_id=email_thread_id
-            ))
+        Emails_Store.append(EmailData(
+            date=email_internal_date,
+            sender=email_from,
+            subject=email_subject,
+            body=email_body,
+            thread_id=email_thread_id
+        ))
+
     return Emails_Store
 
 
-def Extract_Body(email_content):
-    def Decode_Base64(data): #Helper Function
-        return base64.urlsafe_b64decode(data.encode("ASCII")).decode("utf-8",errors="replace")
-    Email_Payload = email_content.get("payload",{})
+### Extracts and decodes the plain text or HTML body of an email message.
+# Falls back to the message snippet if no content is found.
+def Extract_Email_Body(email_content):
+    def Decode_Base64(data):
+        return base64.urlsafe_b64decode(data.encode("ASCII")).decode("utf-8", errors="replace")
 
-    #cover plain text emails that have no alternative formats or attachments
+    Email_Payload = email_content.get("payload", {})
+
+    # Case 1: Simple body
     if "body" in Email_Payload and "data" in Email_Payload["body"]:
         return Decode_Base64(Email_Payload["body"]["data"])
-    
-    for part in Email_Payload.get("parts",[]):
-        if part.get("mimeType") == "text/plain" and "data" in part.get("body",{}):
+
+    # Case 2: Multipart email (text/plain or text/html)
+    for part in Email_Payload.get("parts", []):
+        if part.get("mimeType") == "text/plain" and "data" in part.get("body", {}):
             return Decode_Base64(part["body"]["data"])
-        
-        if part.get("mimeType") == "text/html" and "data" in part.get("body",{}):
+        if part.get("mimeType") == "text/html" and "data" in part.get("body", {}):
             return Decode_Base64(part["body"]["data"])
-        
-    return email_content.get("snippet","")
+
+    # Fallback: return Gmail snippet
+    return email_content.get("snippet", "")
 
 
-def GetEmails(gmail_service):
-    if not gmail_service:
-        Startup_GetService()
-    else:
-        summaries = List_Unread_Emails(gmail_service)
-        SortedData = Sort_Unread_Summaries(summaries,gmail_service)
-
-        email :EmailData
-        for email in SortedData:
-            print(email.sender)
-            print(email.subject)
-            print(email.date)
-            print(email.body)
+### Prints the structured unread emails from the inbox.
+def Print_Unread_Emails(SortedData):
+    email: EmailData
+    for email in SortedData:
+        print(email.sender)
+        print(email.subject)
+        print(email.date)
+        print(email.body)
+        print("-" * 60)
 
 
+### Initializes Gmail API service and starts the email retrieval process.
+def Init_Gmail_Service():
+    return Authenticate_Gmail_Service()
 
 
-
-
-
-
-def Startup_GetService():
-    #gmail_service = Authenticate_Gmail()
-    return Authenticate_Gmail()
-
-        
-
-
-
-#Runs at launch if file is being ran directly
+# Entry point — runs when the file is executed directly.
 if __name__ == "__main__":
-    gmail_service = Startup_GetService()
-    GetEmails(gmail_service)
-    #gmail_service = Authenticate_Gmail()
-    #summaries = List_Unread_Emails(gmail_service)
-
-
-
+    gmail_service = Init_Gmail_Service()
+    summaries = Fetch_Unread_Email_Summaries(gmail_service)
+    sortedData = Parse_Email_Summaries(summaries, gmail_service)
+    Print_Unread_Emails(sortedData)
