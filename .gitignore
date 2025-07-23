@@ -9,3 +9,5 @@ credentials.json
 token.pickle
 venv/
 __pycache__/
+
+processed_emails.db
