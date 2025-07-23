@@ -13,6 +13,5 @@ class EmailData:
 @dataclass
 class SendingEmailData:
     to: str
-    destinationEmail: str
     subject: str
     body:str

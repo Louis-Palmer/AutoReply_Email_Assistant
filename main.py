@@ -10,12 +10,11 @@ def run_autoreply():
     
     for email in SortedData:
         AIResponseEmail = SendingEmailData(
-            to=None,
-            destinationEmail=email.sender,
+            to=email.sender,
             subject="RE: "+ email.subject,
             body= generate_email_reply(email.subject, email.body, email.sender)
         )
-        Send_Email_Reply(AIResponseEmail.destinationEmail, AIResponseEmail.subject,AIResponseEmail.body, email.thread_id)
+        Send_Email_Reply(AIResponseEmail.to, AIResponseEmail.subject,AIResponseEmail.body, email.thread_id)
         
     
 
