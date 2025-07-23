@@ -58,6 +58,9 @@ def Fetch_Unread_Email_Summaries(service):
 
     if not unread_summaries:
         print("No unread messages found.")
+
+        ###TODO Exit here maybe change later
+        exit()
     else:
         return unread_summaries
 
@@ -152,6 +155,47 @@ def Send_Email_Reply(to: str, subject: str, body: str, thread_id: Optional[str] 
         return None
 
 
+def Apply_Label_To_Thread(thread_id: str, importance: str):
+
+    service = Authenticate_Gmail_Service()
+    # Convert importance string to lowercase and define label name
+    label_name = importance.lower().capitalize()  # "High", "Medium", "Low"
+
+    # Fetch existing labels
+    label_list = service.users().labels().list(userId='me').execute()
+    labels = label_list.get("labels", [])
+
+    # Check if label exists
+    label_id = None
+    for label in labels:
+        if label["name"].lower() == label_name.lower():
+            label_id = label["id"]
+            break
+
+    # If label doesn't exist, create it
+    if not label_id:
+        label_obj = {
+            "name": label_name,
+            "labelListVisibility": "labelShow",
+            "messageListVisibility": "show"
+        }
+        created_label = service.users().labels().create(userId='me', body=label_obj).execute()
+        label_id = created_label["id"]
+
+    # Apply the label to the thread
+    service.users().threads().modify(
+        userId='me',
+        id=thread_id,
+        body={
+            "addLabelIds": [label_id],
+            # Optional: remove from inbox
+            # "removeLabelIds": ["INBOX"]
+        }
+    ).execute()
+
+    print(f"✅ Thread {thread_id} labeled as '{label_name}'")
+
+
 
 
 
@@ -182,4 +226,7 @@ if __name__ == "__main__":
     gmail_service = Init_Gmail_Service()
     summaries = Fetch_Unread_Email_Summaries(gmail_service)
     sortedData = Parse_Email_Summaries(summaries, gmail_service)
+
+    #Apply_Label_To_Thread(gmail_service, sortedData[0].thread_id,"High Importance")
+
     Print_Unread_Emails(sortedData)
