@@ -9,6 +9,7 @@ class EmailData:
     subject: str
     body: str
     thread_id: str
+    category: str
 
 @dataclass
 class SendingEmailData:

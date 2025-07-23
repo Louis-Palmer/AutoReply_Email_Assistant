@@ -84,7 +84,8 @@ def Parse_Email_Summaries(unread_summaries, service):
             sender=email_from,
             subject=email_subject,
             body=email_body,
-            thread_id=email_thread_id
+            thread_id=email_thread_id,
+            category = None
         ))
 
     return Emails_Store
