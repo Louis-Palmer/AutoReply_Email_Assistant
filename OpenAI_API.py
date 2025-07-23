@@ -1,5 +1,5 @@
 import openai
-from config import OPENAI_API_KEY, OPENAI_ASSISTANT_KEY
+from config import OPENAI_API_KEY, OPENAI_ASSISTANT_KEY, OPENAI_ASSISTANT_CATEGORISE_KEY
 import time
 import json
 
@@ -58,44 +58,15 @@ def generate_email_reply(email_subject: str, email_body: str, sender_name: str =
         f"Subject: {email_subject}\n\n"
         f"Body:\n{email_body}\n\n"
         f"Write a clear, concise, and professional reply."
-        f"Decide if this email is high, medium, or low importance. "
-        f"Call the function categorize_and_label_email with the appropriate label and email ID '12345'."
-
     )
 
     #return generate_response(prompt)
     return UseAssistant(prompt)
 
 
-# def UseAssistant(prompt: str):
-#     thread = openai.beta.threads.create()
-
-#     openai.beta.threads.messages.create(
-#     thread_id=thread.id,
-#     role="user",
-#     content=prompt
-#     )
-
-#     run = openai.beta.threads.runs.create(
-#     thread_id=thread.id,
-#     assistant_id="asst_8u3chQBmhEaSlaagW7MUuvFq"  # Replace with your real Assistant ID
-#     )
-
-#     while True:
-#         run_status = openai.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
-#         if run_status.status == "completed":
-#             break
-#         time.sleep(1)
-
-#     messages = openai.beta.threads.messages.list(thread_id=thread.id)
-#     for msg in messages.data:
-#         if msg.role == "assistant":
-#             print(msg.content[0].text.value)
-#             return msg.content[0].text.value
 
 
-
-
+### Function Schema for the assistant to respond too
 function_schema = [
     {
         "name": "categorize_and_label_email",
@@ -103,19 +74,26 @@ function_schema = [
         "parameters": {
             "type": "object",
             "properties": {
-                "email_id": {"type": "string"},
                 "importance": {
                     "type": "string",
                     "enum": ["high", "medium", "low"]
                 }
             },
-            "required": ["email_id", "importance"]
+            "required": ["importance"]
         }
     }
 ]
 
+def Categorise_Email_Importance_From_Schema(email_subject: str, email_body: str, sender_name: str = "the sender") -> str:
+    prompt = (
+        f"You received an email from {sender_name}.\n\n"
+        f"Subject: {email_subject}\n\n"
+        f"Body:\n{email_body}\n\n"
+        f"Decide if this email is high, medium, or low importance. "
+        f"Call the function categorize_and_label_email with the appropriate label."
 
-def UseAssistant(prompt: str):
+    )
+
     thread = openai.beta.threads.create()
 
     openai.beta.threads.messages.create(
@@ -157,15 +135,91 @@ def UseAssistant(prompt: str):
 
         else:
             time.sleep(1)
+    return result["label"]
 
+def Categorise_Email_Importance(email_subject: str, email_body: str, sender_name: str = "the sender") -> str:
+    
+    prompt = (
+        f"You received an email from {sender_name}.\n\n"
+        f"Subject: {email_subject}\n\n"
+        f"Body:\n{email_body}\n\n"
+    )
+    # 1. Create a new thread
+    thread = openai.beta.threads.create()
+
+    # 2. Add the user message to the thread
+    openai.beta.threads.messages.create(
+        thread_id=thread.id,
+        role="user",
+        content=prompt
+    )
+
+    # 3. Run the assistant with no tools
+    run = openai.beta.threads.runs.create(
+        thread_id=thread.id,
+        assistant_id=OPENAI_ASSISTANT_CATEGORISE_KEY  # <- your new assistant ID here
+    )
+
+    # 4. Wait for it to finish
+    while True:
+        run_status = openai.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+        if run_status.status == "completed":
+            break
+        elif run_status.status in ["failed", "cancelled", "expired"]:
+            raise RuntimeError(f"Run failed: {run_status.status}")
+        time.sleep(1)
+
+    # 5. Get the assistant's message
     messages = openai.beta.threads.messages.list(thread_id=thread.id)
     for msg in messages.data:
         if msg.role == "assistant" and msg.content[0].type == "text":
             return msg.content[0].text.value
 
-def categorize_and_label_email(email_id: str, importance: str):
+
+def UseAssistant(email_subject: str, email_body: str, sender_name: str = "the sender") -> str:
+    prompt = (
+        f"You received an email from {sender_name}.\n\n"
+        f"Subject: {email_subject}\n\n"
+        f"Body:\n{email_body}\n\n"
+        f"Write a clear, concise, and professional reply."
+    )
+    # Create a new thread
+    thread = openai.beta.threads.create()
+
+    # Add a message to the thread
+    openai.beta.threads.messages.create(
+        thread_id=thread.id,
+        role="user",
+        content=prompt
+    )
+
+    # Run the Assistant (no tools/functions)
+    run = openai.beta.threads.runs.create(
+        thread_id=thread.id,
+        assistant_id=OPENAI_ASSISTANT_KEY,
+        metadata={"source": "auto-reply-script"}
+    )
+
+    # Wait for the run to complete
+    while True:
+        run_status = openai.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+
+        if run_status.status == "completed":
+            break
+        elif run_status.status in ["failed", "cancelled", "expired"]:
+            raise RuntimeError(f"Run failed with status: {run_status.status}")
+        else:
+            time.sleep(1)
+
+    # Get the Assistant's reply
+    messages = openai.beta.threads.messages.list(thread_id=thread.id)
+    for msg in messages.data:
+        if msg.role == "assistant" and msg.content[0].type == "text":
+            return msg.content[0].text.value
+
+def categorize_and_label_email(importance: str):
     print()
-    print(f"[Action] Labeling email {email_id} as {importance.upper()}")
+    print(f"[Action] Labeling as Importance {importance.upper()}")
     # Here you'd call the Gmail API or simulate it
     return {
         "status": "success",
@@ -173,6 +227,7 @@ def categorize_and_label_email(email_id: str, importance: str):
     }
 
 if __name__ == "__main__":
-    print(generate_email_reply("Job offer from OpenAI", "Hi, we’d love to offer you a role...", "OpenAI HR"))
-
+    #print(generate_email_reply("Job offer from OpenAI", "Hi, we’d love to offer you a role...", "OpenAI HR"))
+    #print(Categorise_Email_Importance_From_Schema("Job offer from OpenAI", "Hi, we’d love to offer you a role...", "OpenAI HR"))
     #print(generate_email_reply("Test Subject", "Hi GPT this is a test subject so i want you to respond with the colours that make up a penguin", "Louis Palmer"))
+    print(Categorise_Email_Importance("Job offer from OpenAI", "Hi, we’d love to offer you a role...", "OpenAI HR"))
