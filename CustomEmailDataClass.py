@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-
+#Dataclass That we sort the raw data from the GMAILAPI into for ease of use
 @dataclass
 class EmailData:
     date: datetime
@@ -11,7 +11,8 @@ class EmailData:
     thread_id: str
     category: str
 
-@dataclass
+#Dataclass that we use to send off emails
+@dataclass  
 class SendingEmailData:
     to: str
     subject: str
